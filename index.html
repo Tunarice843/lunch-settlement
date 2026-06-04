@@ -115,17 +115,23 @@
 const CFG_KEY = "lunch_config_v1";
 const REC_KEY = "lunch_records_v1";
 
+const MAX_MEMBERS = 8;            // 슬롯은 8개까지. 이름이 비면 미사용(숨김)
 const DEFAULT_CFG = {
-  members: ["팀원1", "팀원2", "팀원3", "팀원4", "팀원5"],
+  members: ["팀원1", "팀원2", "팀원3", "팀원4", "팀원5", "", "", ""],
   provider: "gemini",            // gemini | openai | claude
   apiKey: "",
   model: ""                       // 비우면 기본 모델 사용
 };
-const DEFAULT_MODELS = { gemini: "gemini-2.0-flash", openai: "gpt-4o", claude: "claude-sonnet-4-6" };
+const DEFAULT_MODELS = { gemini: "gemini-2.5-flash", openai: "gpt-4o", claude: "claude-sonnet-4-6" };
 
 function loadCfg() {
-  try { return Object.assign({}, DEFAULT_CFG, JSON.parse(localStorage.getItem(CFG_KEY) || "{}")); }
-  catch { return Object.assign({}, DEFAULT_CFG); }
+  let c;
+  try { c = Object.assign({}, DEFAULT_CFG, JSON.parse(localStorage.getItem(CFG_KEY) || "{}")); }
+  catch { c = Object.assign({}, DEFAULT_CFG); }
+  // 슬롯 수를 MAX_MEMBERS로 맞춤(기존 5명 설정도 8칸으로 확장)
+  c.members = (c.members || []).slice(0, MAX_MEMBERS);
+  while (c.members.length < MAX_MEMBERS) c.members.push("");
+  return c;
 }
 function saveCfg(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
 function loadRecords() {
@@ -158,7 +164,15 @@ function splitEven(amount, ids) {
   return out;
 }
 
-function memberName(i) { return cfg.members[i] || `팀원${i + 1}`; }
+function memberName(i) { return (cfg.members[i] && cfg.members[i].trim()) || `팀원${i + 1}`; }
+// 이름이 입력된(사용 중인) 팀원 인덱스만
+function activeIndices() { return cfg.members.map((m, i) => i).filter(i => (cfg.members[i] || "").trim() !== ""); }
+// 합계 표시용: 사용 중인 팀원 + 미정산 기록에 등장한 인덱스(이름을 지워도 잔액은 보이도록)
+function displayIndices() {
+  const set = new Set(activeIndices());
+  loadRecords().filter(r => !r.settled).forEach(r => { for (const k in r.splits) set.add(+k); });
+  return [...set].sort((a, b) => a - b);
+}
 
 /* ===================== 모달 / 확인 ===================== */
 function closeModal() { $("modalRoot").innerHTML = ""; }
@@ -204,7 +218,7 @@ function renderHome() {
         <span class="badge open">${openCount}건</span></div>
       <div class="total-amt" style="margin:8px 0 14px">${won(grand)}</div>
       <div>
-        ${bal.map((b, i) => `<div class="bal-row"><span class="bal-name">${esc(memberName(i))}</span><span class="bal-amt">${won(b)}</span></div>`).join("")}
+        ${displayIndices().map(i => `<div class="bal-row"><span class="bal-name">${esc(memberName(i))}</span><span class="bal-amt">${won(bal[i] || 0)}</span></div>`).join("")}
       </div>
     </div>
 
@@ -403,7 +417,7 @@ function render1N() {
       <h2>오늘 점심 인원은?</h2>
       <p class="muted">함께 먹은 팀원을 모두 선택하세요. 총 ${won(draft.total)}을 균등 분할합니다.</p>
       <div class="member-grid" id="n1grid">
-        ${cfg.members.map((m, i) => `<div class="chip" data-i="${i}" onclick="toggleN1(${i})">${esc(m)}</div>`).join("")}
+        ${activeIndices().map(i => `<div class="chip" data-i="${i}" onclick="toggleN1(${i})">${esc(memberName(i))}</div>`).join("")}
       </div>
       <div class="center" id="n1hint" style="margin:14px 0;font-weight:700"></div>
       <button class="btn ok" onclick="saveN1()">저장</button>
@@ -437,8 +451,8 @@ function renderItemAssign() {
 function drawItemAssign() {
   const html = draft.items.map((it, idx) => {
     const a = itemAssign[idx];
-    const chips = cfg.members.map((m, i) =>
-      `<div class="chip ${a.members.has(i) && !a.everyone ? "on" : ""}" onclick="toggleItemMember(${idx},${i})">${esc(m)}</div>`
+    const chips = activeIndices().map(i =>
+      `<div class="chip ${a.members.has(i) && !a.everyone ? "on" : ""}" onclick="toggleItemMember(${idx},${i})">${esc(memberName(i))}</div>`
     ).join("");
     return `
       <div class="item-card">
@@ -631,12 +645,13 @@ function openSettings() {
   $("main").innerHTML = `
     <div class="card">
       <h2>설정</h2>
-      <label class="fld">팀원 이름 (5명)</label>
-      ${cfg.members.map((m, i) => `<input type="text" style="margin-bottom:8px" value="${esc(m)}" oninput="cfg.members[${i}]=this.value" placeholder="팀원${i+1}">`).join("")}
+      <label class="fld">팀원 이름 (최대 ${MAX_MEMBERS}명 · 비우면 미사용)</label>
+      ${cfg.members.map((m, i) => `<input type="text" style="margin-bottom:8px" value="${esc(m)}" oninput="cfg.members[${i}]=this.value" placeholder="슬롯 ${i+1} (비우면 숨김)">`).join("")}
+      <div class="small muted">이름이 입력된 팀원만 선택 화면·합계에 나타납니다. 팀원이 늘면 빈 칸에 이름만 추가하세요.</div>
 
       <label class="fld">AI 제공자</label>
       <select id="provSel" onchange="cfg.provider=this.value;updateModelPh()">
-        <option value="gemini" ${cfg.provider==="gemini"?"selected":""}>Google Gemini (무료 티어 권장)</option>
+        <option value="gemini" ${cfg.provider==="gemini"?"selected":""}>Google Gemini (권장)</option>
         <option value="openai" ${cfg.provider==="openai"?"selected":""}>OpenAI (GPT-4o)</option>
         <option value="claude" ${cfg.provider==="claude"?"selected":""}>Anthropic Claude</option>
       </select>
@@ -661,14 +676,14 @@ function updateModelPh() {
   const p = $("provSel").value;
   $("modelInput").placeholder = "기본: " + DEFAULT_MODELS[p];
   const help = {
-    gemini: "발급: aistudio.google.com → 'Get API key'. 구글 계정으로 무료.",
+    gemini: "발급: aistudio.google.com → 'Get API key'. 무료/유료는 키에 연결된 구글 클라우드 결제 설정에 따라 자동 적용(앱과 무관).",
     openai: "발급: platform.openai.com → API keys (유료, 결제수단 필요).",
     claude: "발급: console.anthropic.com → API Keys (유료)."
   };
   $("keyHelp").textContent = help[p];
 }
 function commitSettings() {
-  cfg.members = cfg.members.map((m, i) => (m && m.trim()) ? m.trim() : `팀원${i+1}`);
+  cfg.members = cfg.members.map(m => (m || "").trim());   // 빈 칸은 그대로 비워둠(미사용)
   saveCfg(cfg);
   toast("설정이 저장되었습니다");
   renderHome();
