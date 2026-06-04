@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>점심식대 정산</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍱</text></svg>">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --pri: #2563eb; --pri-d: #1d4ed8;
+    --txt: #1f2937; --mut: #6b7280; --line: #e5e7eb; --ok: #16a34a;
+    --warn: #dc2626; --warn-bg: #fef2f2;
+  }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    background: var(--bg); color: var(--txt); font-size: 16px; line-height: 1.5;
+    max-width: 560px; margin: 0 auto; min-height: 100vh; position: relative;
+  }
+  header {
+    background: var(--pri); color: #fff; padding: 14px 16px; position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(0,0,0,.12);
+  }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header button {
+    background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 8px;
+    padding: 7px 11px; font-size: 14px; font-weight: 600;
+  }
+  main { padding: 16px; padding-bottom: 90px; }
+  .card { background: var(--card); border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card h2 { font-size: 16px; margin: 0 0 12px; }
+  .muted { color: var(--mut); font-size: 14px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .between { justify-content: space-between; }
+  label.fld { display: block; font-size: 13px; font-weight: 600; color: var(--mut); margin: 10px 0 4px; }
+  input[type=text], input[type=password], input[type=number], input[type=date], select {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
+    font-size: 16px; background: #fff; color: var(--txt);
+  }
+  .btn {
+    display: block; width: 100%; border: none; border-radius: 12px; padding: 14px;
+    font-size: 16px; font-weight: 700; background: var(--pri); color: #fff; margin-top: 10px;
+  }
+  .btn:active { background: var(--pri-d); }
+  .btn.sec { background: #e5e7eb; color: var(--txt); }
+  .btn.ok { background: var(--ok); }
+  .btn.danger { background: var(--warn); }
+  .btn.sm { padding: 10px; font-size: 14px; margin-top: 0; }
+  .btn:disabled { opacity: .5; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hidden { display: none !important; }
+  .chip {
+    display: inline-flex; align-items: center; justify-content: center; padding: 9px 6px;
+    border: 1.5px solid var(--line); border-radius: 10px; font-size: 14px; font-weight: 600;
+    background: #fff; color: var(--txt); text-align: center; cursor: pointer; user-select: none;
+  }
+  .chip.on { background: var(--pri); color: #fff; border-color: var(--pri); }
+  .chip.all.on { background: var(--ok); border-color: var(--ok); }
+  .member-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .bal-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .bal-row:last-child { border-bottom: none; }
+  .bal-name { font-weight: 600; }
+  .bal-amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .total-amt { font-size: 26px; font-weight: 800; color: var(--pri); }
+  .item-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  .item-head { display: flex; justify-content: space-between; font-weight: 700; margin-bottom: 8px; }
+  .item-price { color: var(--pri); font-variant-numeric: tabular-nums; }
+  .preview { width: 100%; border-radius: 12px; margin-top: 10px; max-height: 360px; object-fit: contain; background: #000; }
+  .rec { border-bottom: 1px solid var(--line); padding: 12px 0; }
+  .rec:last-child { border-bottom: none; }
+  .rec-head { display: flex; justify-content: space-between; font-weight: 600; }
+  .rec-sub { font-size: 13px; color: var(--mut); margin-top: 3px; }
+  .badge { font-size: 11px; padding: 2px 7px; border-radius: 999px; font-weight: 700; }
+  .badge.settled { background: #e5e7eb; color: var(--mut); }
+  .badge.open { background: #dbeafe; color: var(--pri-d); }
+  .badge.n1 { background: #dcfce7; color: #15803d; }
+  .badge.item { background: #fef3c7; color: #b45309; }
+  /* modal */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+  .modal { background: #fff; border-radius: 16px; padding: 20px; max-width: 420px; width: 100%; max-height: 86vh; overflow: auto; }
+  .modal h3 { margin: 0 0 8px; font-size: 18px; }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff;
+    padding: 11px 18px; border-radius: 999px; font-size: 14px; z-index: 200; opacity: 0; transition: opacity .2s;
+    max-width: 90%; text-align: center;
+  }
+  .toast.show { opacity: .96; }
+  .summary-box { background: #f9fafb; border: 1px dashed var(--line); border-radius: 10px; padding: 12px; font-size: 14px; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
+  .spinner { width: 22px; height: 22px; border: 3px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .center { text-align: center; }
+  .small { font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:20px">🍱</span>
+  <h1>점심식대 정산</h1>
+  <button id="btnSettings">설정</button>
+</header>
+
+<main id="main"></main>
+
+<div id="toast" class="toast"></div>
+<div id="modalRoot"></div>
+
+<script>
+"use strict";
+
+/* ===================== 저장소 / 상태 ===================== */
+const CFG_KEY = "lunch_config_v1";
+const REC_KEY = "lunch_records_v1";
+
+const DEFAULT_CFG = {
+  members: ["팀원1", "팀원2", "팀원3", "팀원4", "팀원5"],
+  provider: "gemini",            // gemini | openai | claude
+  apiKey: "",
+  model: ""                       // 비우면 기본 모델 사용
+};
+const DEFAULT_MODELS = { gemini: "gemini-2.0-flash", openai: "gpt-4o", claude: "claude-sonnet-4-6" };
+
+function loadCfg() {
+  try { return Object.assign({}, DEFAULT_CFG, JSON.parse(localStorage.getItem(CFG_KEY) || "{}")); }
+  catch { return Object.assign({}, DEFAULT_CFG); }
+}
+function saveCfg(c) { localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
+function loadRecords() {
+  try { return JSON.parse(localStorage.getItem(REC_KEY) || "[]"); } catch { return []; }
+}
+function saveRecords(r) { localStorage.setItem(REC_KEY, JSON.stringify(r)); }
+
+let cfg = loadCfg();
+// 진행 중인 영수증 작업 상태
+let draft = null; // { imageDataUrl, base64, mime, store, date, items:[{name,price}], total }
+
+/* ===================== 유틸 ===================== */
+const $ = (id) => document.getElementById(id);
+const won = (n) => Math.round(n).toLocaleString("ko-KR") + "원";
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// 금액을 ids 인원에게 균등 분할(원 단위, 나머지는 앞에서부터 1원씩). { id: 금액 } 반환
+function splitEven(amount, ids) {
+  const out = {}; const n = ids.length;
+  if (n === 0) return out;
+  const base = Math.floor(amount / n);
+  let rem = amount - base * n;
+  ids.forEach((id, i) => { out[id] = base + (i < rem ? 1 : 0); });
+  return out;
+}
+
+function memberName(i) { return cfg.members[i] || `팀원${i + 1}`; }
+
+/* ===================== 모달 / 확인 ===================== */
+function closeModal() { $("modalRoot").innerHTML = ""; }
+function confirmDialog(title, body, okLabel, onOk, danger) {
+  $("modalRoot").innerHTML = `
+    <div class="overlay" id="ov">
+      <div class="modal">
+        <h3>${esc(title)}</h3>
+        <div class="muted" style="margin-bottom:16px">${body}</div>
+        <button class="btn ${danger ? "danger" : ""}" id="mOk">${esc(okLabel)}</button>
+        <button class="btn sec" id="mCancel">취소</button>
+      </div>
+    </div>`;
+  $("mCancel").onclick = closeModal;
+  $("ov").onclick = (e) => { if (e.target.id === "ov") closeModal(); };
+  $("mOk").onclick = () => { closeModal(); onOk(); };
+}
+
+/* ===================== 홈 화면 ===================== */
+function balancesByMember() {
+  const recs = loadRecords().filter(r => !r.settled);
+  const bal = cfg.members.map(() => 0);
+  recs.forEach(r => { for (const k in r.splits) bal[+k] += r.splits[k]; });
+  return bal;
+}
+
+function renderHome() {
+  draft = null;
+  const bal = balancesByMember();
+  const grand = bal.reduce((a, b) => a + b, 0);
+  const openCount = loadRecords().filter(r => !r.settled).length;
+  const needSetup = !cfg.apiKey;
+
+  $("main").innerHTML = `
+    ${needSetup ? `<div class="card" style="border:1px solid #fde68a;background:#fffbeb">
+      <b>⚠ 설정이 필요합니다</b>
+      <div class="muted" style="margin-top:6px">영수증 해독을 위해 AI API 키를 등록하세요.</div>
+      <button class="btn sm" style="margin-top:10px" onclick="openSettings()">설정 열기</button>
+    </div>` : ""}
+
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">현재 미정산 합계</h2>
+        <span class="badge open">${openCount}건</span></div>
+      <div class="total-amt" style="margin:8px 0 14px">${won(grand)}</div>
+      <div>
+        ${bal.map((b, i) => `<div class="bal-row"><span class="bal-name">${esc(memberName(i))}</span><span class="bal-amt">${won(b)}</span></div>`).join("")}
+      </div>
+    </div>
+
+    <button class="btn" onclick="startReceipt()">📷 영수증 추가</button>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn sec sm" onclick="renderHistory()">📒 내역 보기</button>
+      <button class="btn sec sm" onclick="doSettle()">✅ 정산 수행</button>
+    </div>
+  `;
+}
+
+/* ===================== 영수증 추가: 이미지 입력 ===================== */
+function startReceipt() {
+  if (!cfg.apiKey) { toast("먼저 설정에서 API 키를 등록하세요"); openSettings(); return; }
+  draft = null;
+  $("main").innerHTML = `
+    <div class="card">
+      <h2>영수증 등록</h2>
+      <p class="muted">실물 영수증을 촬영하거나, 저장된 이미지를 업로드하세요.</p>
+      <input type="file" id="fileCam" accept="image/*" capture="environment" class="hidden">
+      <input type="file" id="fileUp" accept="image/*" class="hidden">
+      <button class="btn" onclick="$('fileCam').click()">📷 카메라로 촬영</button>
+      <button class="btn sec" onclick="$('fileUp').click()">🖼️ 이미지 업로드</button>
+      <img id="preview" class="preview hidden" alt="미리보기">
+      <button class="btn ok hidden" id="btnAnalyze" onclick="analyze()">🔍 영수증 분석</button>
+      <button class="btn sec sm" style="margin-top:14px" onclick="renderHome()">← 홈으로</button>
+    </div>
+  `;
+  $("fileCam").onchange = (e) => onImage(e.target.files[0]);
+  $("fileUp").onchange = (e) => onImage(e.target.files[0]);
+}
+
+function onImage(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    draft = { imageDataUrl: dataUrl, base64: dataUrl.split(",")[1], mime: file.type || "image/jpeg" };
+    const img = $("preview"); img.src = dataUrl; img.classList.remove("hidden");
+    $("btnAnalyze").classList.remove("hidden");
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ===================== AI Vision 호출 ===================== */
+const VISION_PROMPT =
+  "이 이미지는 한국 식당의 영수증입니다. 메뉴 항목과 금액을 추출해 아래 JSON 형식으로만 답하세요. " +
+  "설명/마크다운 없이 순수 JSON만 출력합니다.\n" +
+  '{"store":"상점명 또는 빈문자열","date":"YYYY-MM-DD(없으면 빈문자열)",' +
+  '"items":[{"name":"메뉴명","price":숫자}],"total":숫자}\n' +
+  "규칙: items에는 실제 주문 메뉴만 넣습니다. 소계/합계/부가세/봉사료/할인/카드승인/잔돈 등은 제외. " +
+  "수량이 2 이상인 메뉴는 그 줄의 합계 금액(단가×수량)을 price로 넣습니다. price와 total은 숫자만(쉼표·원 표시 없이).";
+
+async function analyze() {
+  if (!draft || !draft.base64) { toast("이미지를 먼저 선택하세요"); return; }
+  const btn = $("btnAnalyze");
+  btn.disabled = true; btn.innerHTML = '<div class="row" style="justify-content:center"><div class="spinner"></div>&nbsp;분석 중...</div>';
+  try {
+    const data = await callVision(draft.base64, draft.mime);
+    draft.store = data.store || "";
+    draft.date = (data.date && /^\d{4}-\d{2}-\d{2}$/.test(data.date)) ? data.date : todayStr();
+    draft.items = (data.items || []).filter(it => it && it.name).map(it => ({ name: String(it.name), price: Math.max(0, Math.round(Number(it.price) || 0)) }));
+    const sum = draft.items.reduce((a, it) => a + it.price, 0);
+    draft.total = Math.round(Number(data.total) || 0) || sum;
+    if (draft.items.length === 0) { toast("메뉴를 인식하지 못했습니다. 직접 입력하세요."); }
+    renderReview();
+  } catch (err) {
+    console.error(err);
+    confirmDialog("분석 실패", "AI 응답을 받지 못했습니다.<br><span class='small'>" + esc(err.message) + "</span><br><br>직접 입력으로 진행할까요?", "직접 입력", () => {
+      draft.store = ""; draft.date = todayStr(); draft.items = []; draft.total = 0; renderReview();
+    });
+  } finally {
+    btn.disabled = false; btn.innerHTML = "🔍 영수증 분석";
+  }
+}
+
+async function callVision(base64, mime) {
+  const provider = cfg.provider;
+  const model = cfg.model || DEFAULT_MODELS[provider];
+  let text;
+  if (provider === "gemini") {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`;
+    const res = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: VISION_PROMPT }, { inline_data: { mime_type: mime, data: base64 } }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0 }
+      })
+    });
+    if (!res.ok) throw new Error("Gemini " + res.status + ": " + (await res.text()).slice(0, 200));
+    const j = await res.json();
+    text = j.candidates?.[0]?.content?.parts?.map(p => p.text).join("") || "";
+  } else if (provider === "openai") {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey },
+      body: JSON.stringify({
+        model, temperature: 0, response_format: { type: "json_object" },
+        messages: [{ role: "user", content: [
+          { type: "text", text: VISION_PROMPT },
+          { type: "image_url", image_url: { url: `data:${mime};base64,${base64}` } }
+        ] }]
+      })
+    });
+    if (!res.ok) throw new Error("OpenAI " + res.status + ": " + (await res.text()).slice(0, 200));
+    const j = await res.json();
+    text = j.choices?.[0]?.message?.content || "";
+  } else { // claude
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json", "x-api-key": cfg.apiKey,
+        "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model, max_tokens: 1500,
+        messages: [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: mime, data: base64 } },
+          { type: "text", text: VISION_PROMPT }
+        ] }]
+      })
+    });
+    if (!res.ok) throw new Error("Claude " + res.status + ": " + (await res.text()).slice(0, 200));
+    const j = await res.json();
+    text = j.content?.map(c => c.text).join("") || "";
+  }
+  return parseJsonLoose(text);
+}
+
+function parseJsonLoose(text) {
+  if (!text) throw new Error("빈 응답");
+  let t = text.trim().replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+  try { return JSON.parse(t); } catch {}
+  const m = t.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch {} }
+  throw new Error("JSON 파싱 실패");
+}
+
+/* ===================== 분석 결과 검토 / 수정 ===================== */
+function renderReview() {
+  const it = draft.items.map((x, i) => `
+    <div class="item-card">
+      <div class="row" style="gap:8px">
+        <input type="text" value="${esc(x.name)}" oninput="draft.items[${i}].name=this.value" style="flex:1">
+        <input type="number" value="${x.price}" oninput="draft.items[${i}].price=Math.max(0,Math.round(+this.value||0));refreshSum()" style="width:110px">
+        <button class="btn danger sm" style="width:auto;padding:8px 10px" onclick="draft.items.splice(${i},1);renderReview()">✕</button>
+      </div>
+    </div>`).join("");
+  $("main").innerHTML = `
+    <div class="card">
+      <h2>분석 결과 확인</h2>
+      <p class="muted">인식된 내용을 확인하고 필요하면 수정하세요.</p>
+      <label class="fld">상점</label>
+      <input type="text" value="${esc(draft.store)}" oninput="draft.store=this.value">
+      <label class="fld">날짜</label>
+      <input type="date" value="${esc(draft.date)}" oninput="draft.date=this.value">
+      <label class="fld">메뉴 항목</label>
+      ${it || '<p class="muted small">인식된 메뉴가 없습니다. 아래 버튼으로 추가하세요.</p>'}
+      <button class="btn sec sm" onclick="draft.items.push({name:'',price:0});renderReview()">+ 항목 추가</button>
+      <div class="row between" style="margin-top:14px">
+        <span class="muted">합계</span>
+        <input type="number" id="totalInput" value="${draft.total}" oninput="draft.total=Math.max(0,Math.round(+this.value||0))" style="width:140px;text-align:right;font-weight:700">
+      </div>
+      <div class="small muted center" id="sumHint" style="margin-top:6px"></div>
+      <button class="btn" onclick="askSplitMode()">다음 →</button>
+      <button class="btn sec sm" style="margin-top:14px" onclick="startReceipt()">← 다시 촬영</button>
+    </div>`;
+  refreshSum();
+}
+function refreshSum() {
+  const sum = draft.items.reduce((a, x) => a + (+x.price || 0), 0);
+  const hint = $("sumHint"); if (!hint) return;
+  hint.textContent = `메뉴 합 ${won(sum)}` + (sum !== draft.total ? `  ·  합계와 ${won(Math.abs(sum - draft.total))} 차이` : "  · 합계 일치");
+  hint.style.color = sum !== draft.total ? "var(--warn)" : "var(--ok)";
+}
+
+/* ===================== 질문 ①: 1/N 정산인가요? ===================== */
+function askSplitMode() {
+  if (draft.total <= 0) { toast("합계 금액을 입력하세요"); return; }
+  $("modalRoot").innerHTML = `
+    <div class="overlay" id="ov"><div class="modal">
+      <h3>1/N 정산인가요?</h3>
+      <div class="muted" style="margin-bottom:16px">총 ${won(draft.total)} · ${esc(draft.date)}</div>
+      <button class="btn ok" onclick="closeModal();render1N()">예 (균등 분할)</button>
+      <button class="btn" onclick="closeModal();renderItemAssign()">아니오 (품목별 배정)</button>
+      <button class="btn sec sm" style="margin-top:14px" onclick="closeModal()">취소</button>
+    </div></div>`;
+}
+
+/* ===================== ① 예: 인원 체크 → 균등 분할 ===================== */
+let n1Selected = new Set();
+function render1N() {
+  n1Selected = new Set();
+  $("main").innerHTML = `
+    <div class="card">
+      <h2>오늘 점심 인원은?</h2>
+      <p class="muted">함께 먹은 팀원을 모두 선택하세요. 총 ${won(draft.total)}을 균등 분할합니다.</p>
+      <div class="member-grid" id="n1grid">
+        ${cfg.members.map((m, i) => `<div class="chip" data-i="${i}" onclick="toggleN1(${i})">${esc(m)}</div>`).join("")}
+      </div>
+      <div class="center" id="n1hint" style="margin:14px 0;font-weight:700"></div>
+      <button class="btn ok" onclick="saveN1()">저장</button>
+      <button class="btn sec sm" style="margin-top:10px" onclick="renderReview()">← 뒤로</button>
+    </div>`;
+  updateN1Hint();
+}
+function toggleN1(i) {
+  if (n1Selected.has(i)) n1Selected.delete(i); else n1Selected.add(i);
+  document.querySelector(`#n1grid .chip[data-i="${i}"]`).classList.toggle("on");
+  updateN1Hint();
+}
+function updateN1Hint() {
+  const n = n1Selected.size;
+  $("n1hint").textContent = n ? `${n}명 · 1인당 약 ${won(draft.total / n)}` : "인원을 선택하세요";
+}
+function saveN1() {
+  if (n1Selected.size === 0) { toast("인원을 선택하세요"); return; }
+  const ids = [...n1Selected].sort((a, b) => a - b);
+  const splits = splitEven(draft.total, ids.map(String));
+  commitRecord("1/N", splits, { participants: ids });
+}
+
+/* ===================== ② 아니오: 품목별 배정 ===================== */
+// 각 항목: assign = Set(멤버index) 또는 everyone=true
+let itemAssign = [];
+function renderItemAssign() {
+  itemAssign = draft.items.map(() => ({ everyone: false, members: new Set() }));
+  drawItemAssign();
+}
+function drawItemAssign() {
+  const html = draft.items.map((it, idx) => {
+    const a = itemAssign[idx];
+    const chips = cfg.members.map((m, i) =>
+      `<div class="chip ${a.members.has(i) && !a.everyone ? "on" : ""}" onclick="toggleItemMember(${idx},${i})">${esc(m)}</div>`
+    ).join("");
+    return `
+      <div class="item-card">
+        <div class="item-head"><span>${esc(it.name || "(이름없음)")}</span><span class="item-price">${won(it.price)}</span></div>
+        <div class="member-grid">
+          ${chips}
+          <div class="chip all ${a.everyone ? "on" : ""}" onclick="toggleItemEveryone(${idx})">전원</div>
+        </div>
+      </div>`;
+  }).join("");
+  $("main").innerHTML = `
+    <div class="card">
+      <h2>품목별 배정</h2>
+      <p class="muted">각 메뉴를 먹은 팀원을 선택하세요. 여러 명이면 그 인원으로 나눕니다.<br>
+      <b>전원</b> = 점심 먹은 인원수로 분할(공유 사이드 메뉴용).</p>
+      ${html || '<p class="muted">항목이 없습니다.</p>'}
+      <div class="summary-box small" id="assignPreview" style="margin-top:6px"></div>
+      <button class="btn ok" onclick="saveItemAssign()">저장</button>
+      <button class="btn sec sm" style="margin-top:10px" onclick="renderReview()">← 뒤로</button>
+    </div>`;
+  updateAssignPreview();
+}
+function toggleItemMember(idx, i) {
+  const a = itemAssign[idx];
+  a.everyone = false;
+  if (a.members.has(i)) a.members.delete(i); else a.members.add(i);
+  drawItemAssign();
+}
+function toggleItemEveryone(idx) {
+  const a = itemAssign[idx];
+  a.everyone = !a.everyone;
+  if (a.everyone) a.members.clear();
+  drawItemAssign();
+}
+// 점심 먹은 인원 = 개별 배정된 멤버들의 합집합
+function computeLunchers() {
+  const set = new Set();
+  itemAssign.forEach(a => { if (!a.everyone) a.members.forEach(i => set.add(i)); });
+  return [...set].sort((x, y) => x - y);
+}
+function computeItemSplits() {
+  const lunchers = computeLunchers();
+  const splits = {};
+  const add = (id, amt) => { splits[id] = (splits[id] || 0) + amt; };
+  draft.items.forEach((it, idx) => {
+    const a = itemAssign[idx];
+    let ids;
+    if (a.everyone) ids = lunchers;        // 전원 → 점심 먹은 인원수로 분할
+    else ids = [...a.members].sort((x, y) => x - y);
+    if (ids.length === 0) return;           // 미배정 항목은 건너뜀(검증에서 막음)
+    const part = splitEven(it.price, ids.map(String));
+    for (const k in part) add(k, part[k]);
+  });
+  return { splits, lunchers };
+}
+function updateAssignPreview() {
+  const { splits, lunchers } = computeItemSplits();
+  const box = $("assignPreview");
+  if (!box) return;
+  if (lunchers.length === 0) { box.textContent = "개별 메뉴를 먹은 팀원을 먼저 선택하세요."; return; }
+  let txt = `점심 인원 ${lunchers.length}명\n`;
+  lunchers.forEach(i => { txt += `· ${memberName(i)}: ${won(splits[i] || 0)}\n`; });
+  const assigned = Object.values(splits).reduce((a, b) => a + b, 0);
+  txt += `합계 ${won(assigned)}`;
+  box.textContent = txt;
+}
+function saveItemAssign() {
+  // 검증: 모든 항목에 배정이 있어야 하고, 전원 항목이 있으면 점심 인원이 있어야 함
+  const lunchers = computeLunchers();
+  for (let idx = 0; idx < draft.items.length; idx++) {
+    const a = itemAssign[idx];
+    if (a.everyone) { if (lunchers.length === 0) { toast(`'${draft.items[idx].name}'은 전원 분할인데 점심 인원이 없습니다`); return; } }
+    else if (a.members.size === 0) { toast(`'${draft.items[idx].name || (idx+1)+"번"}' 항목의 인원을 선택하세요`); return; }
+  }
+  const { splits } = computeItemSplits();
+  if (Object.keys(splits).length === 0) { toast("배정된 인원이 없습니다"); return; }
+  commitRecord("item", splits, { lunchers });
+}
+
+/* ===================== 기록 저장 ===================== */
+function commitRecord(mode, splits, extra) {
+  const recs = loadRecords();
+  const rec = {
+    id: "r" + Date.now() + Math.floor(Math.random() * 1000),
+    date: draft.date, store: draft.store, mode,
+    items: draft.items.map(x => ({ name: x.name, price: x.price })),
+    total: draft.total,
+    splits, settled: false, settledBatch: null,
+    createdAt: new Date().toISOString(),
+    extra: extra || {}
+  };
+  recs.push(rec);
+  saveRecords(recs);
+  draft = null;
+  toast("저장되었습니다");
+  renderHome();
+}
+
+/* ===================== 내역 보기 ===================== */
+function renderHistory() {
+  const recs = loadRecords().slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt < b.createdAt ? 1 : -1)));
+  const open = recs.filter(r => !r.settled);
+  const settled = recs.filter(r => r.settled);
+  const renderRec = (r) => {
+    const parts = Object.keys(r.splits).sort((a,b)=>a-b).map(k => `${memberName(+k)} ${won(r.splits[k])}`).join(" · ");
+    return `<div class="rec">
+      <div class="rec-head">
+        <span>${esc(r.date)} · ${esc(r.store || "상점미상")}</span>
+        <span>${won(r.total)}</span>
+      </div>
+      <div class="rec-sub">
+        <span class="badge ${r.mode === "1/N" ? "n1" : "item"}">${r.mode === "1/N" ? "1/N" : "품목별"}</span>
+        <span class="badge ${r.settled ? "settled" : "open"}">${r.settled ? "정산완료" : "미정산"}</span>
+        &nbsp;${esc(parts)}
+      </div>
+      <div style="margin-top:8px"><button class="btn danger sm" style="width:auto;padding:6px 12px" onclick="deleteRecord('${r.id}')">삭제</button></div>
+    </div>`;
+  };
+  $("main").innerHTML = `
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">미정산 내역</h2><span class="badge open">${open.length}건</span></div>
+      ${open.length ? open.map(renderRec).join("") : '<p class="muted">미정산 내역이 없습니다.</p>'}
+    </div>
+    <div class="card">
+      <div class="row between"><h2 style="margin:0">정산 완료 내역</h2><span class="badge settled">${settled.length}건</span></div>
+      ${settled.length ? settled.map(renderRec).join("") : '<p class="muted">아직 없습니다.</p>'}
+    </div>
+    <button class="btn sec sm" onclick="renderHome()">← 홈으로</button>
+  `;
+}
+function deleteRecord(id) {
+  confirmDialog("기록 삭제", "이 기록을 삭제할까요? 되돌릴 수 없습니다.", "삭제", () => {
+    saveRecords(loadRecords().filter(r => r.id !== id));
+    toast("삭제되었습니다"); renderHistory();
+  }, true);
+}
+
+/* ===================== 정산 수행 ===================== */
+function doSettle() {
+  const open = loadRecords().filter(r => !r.settled);
+  if (open.length === 0) { toast("정산할 내역이 없습니다"); return; }
+  const bal = balancesByMember();
+  const grand = bal.reduce((a, b) => a + b, 0);
+  const summary = buildSettleSummary(bal, grand, open);
+  $("modalRoot").innerHTML = `
+    <div class="overlay" id="ov"><div class="modal">
+      <h3>정산 수행</h3>
+      <div class="muted" style="margin-bottom:10px">아래 ${open.length}건(총 ${won(grand)})을 정산 완료 처리합니다.<br>
+      처리 후 미정산 잔액은 <b>0원으로 초기화</b>되며, 기록 자체는 보존됩니다.</div>
+      <div class="summary-box" id="settleSummary">${esc(summary)}</div>
+      <button class="btn sec sm" style="margin-top:10px" onclick="copySummary()">📋 정산 내역 복사 (메일용)</button>
+      <button class="btn danger" style="margin-top:14px" onclick="confirmSettle()">정산 확정 (잔액 0 초기화)</button>
+      <button class="btn sec sm" style="margin-top:10px" onclick="closeModal()">취소</button>
+    </div></div>`;
+  $("ov").onclick = (e) => { if (e.target.id === "ov") closeModal(); };
+}
+function buildSettleSummary(bal, grand, open) {
+  const dates = open.map(r => r.date).sort();
+  let s = `[점심식대 정산]\n기간: ${dates[0]} ~ ${dates[dates.length-1]}\n건수: ${open.length}건\n총액: ${won(grand)}\n\n`;
+  bal.forEach((b, i) => { if (b > 0) s += `${memberName(i)}: ${won(b)}\n`; });
+  return s.trim();
+}
+let _lastSummary = "";
+function copySummary() {
+  _lastSummary = $("settleSummary").textContent;
+  const done = () => toast("복사되었습니다");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(_lastSummary).then(done).catch(() => fallbackCopy(_lastSummary, done));
+  } else fallbackCopy(_lastSummary, done);
+}
+function fallbackCopy(text, cb) {
+  const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); cb(); } catch { toast("복사 실패 — 길게 눌러 직접 복사하세요"); }
+  document.body.removeChild(ta);
+}
+function confirmSettle() {
+  closeModal();
+  confirmDialog("정말 정산할까요?", "미정산 내역이 모두 정산 완료로 바뀌고 잔액이 0이 됩니다.", "확정", () => {
+    const recs = loadRecords();
+    const batch = "b" + Date.now();
+    recs.forEach(r => { if (!r.settled) { r.settled = true; r.settledBatch = batch; r.settledAt = new Date().toISOString(); } });
+    saveRecords(recs);
+    toast("정산 완료 — 잔액이 초기화되었습니다");
+    renderHome();
+  }, true);
+}
+
+/* ===================== 설정 ===================== */
+function openSettings() {
+  $("main").innerHTML = `
+    <div class="card">
+      <h2>설정</h2>
+      <label class="fld">팀원 이름 (5명)</label>
+      ${cfg.members.map((m, i) => `<input type="text" style="margin-bottom:8px" value="${esc(m)}" oninput="cfg.members[${i}]=this.value" placeholder="팀원${i+1}">`).join("")}
+
+      <label class="fld">AI 제공자</label>
+      <select id="provSel" onchange="cfg.provider=this.value;updateModelPh()">
+        <option value="gemini" ${cfg.provider==="gemini"?"selected":""}>Google Gemini (무료 티어 권장)</option>
+        <option value="openai" ${cfg.provider==="openai"?"selected":""}>OpenAI (GPT-4o)</option>
+        <option value="claude" ${cfg.provider==="claude"?"selected":""}>Anthropic Claude</option>
+      </select>
+
+      <label class="fld">API 키</label>
+      <input type="password" id="apiKeyInput" value="${esc(cfg.apiKey)}" oninput="cfg.apiKey=this.value" placeholder="API 키 붙여넣기" autocomplete="off">
+      <div class="small muted" style="margin-top:4px" id="keyHelp"></div>
+
+      <label class="fld">모델 (선택, 비우면 기본값)</label>
+      <input type="text" id="modelInput" value="${esc(cfg.model)}" oninput="cfg.model=this.value">
+
+      <button class="btn ok" onclick="commitSettings()">저장</button>
+      <button class="btn sec sm" style="margin-top:10px" onclick="renderHome()">← 홈으로</button>
+
+      <div class="small muted" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+        ⚠ API 키는 이 휴대폰의 브라우저 저장소에만 보관되며 외부로 전송되지 않습니다(영수증 이미지를 해당 AI 서버로 보낼 때만 키가 사용됨). 공용 기기에서는 사용에 주의하세요.
+      </div>
+    </div>`;
+  updateModelPh();
+}
+function updateModelPh() {
+  const p = $("provSel").value;
+  $("modelInput").placeholder = "기본: " + DEFAULT_MODELS[p];
+  const help = {
+    gemini: "발급: aistudio.google.com → 'Get API key'. 구글 계정으로 무료.",
+    openai: "발급: platform.openai.com → API keys (유료, 결제수단 필요).",
+    claude: "발급: console.anthropic.com → API Keys (유료)."
+  };
+  $("keyHelp").textContent = help[p];
+}
+function commitSettings() {
+  cfg.members = cfg.members.map((m, i) => (m && m.trim()) ? m.trim() : `팀원${i+1}`);
+  saveCfg(cfg);
+  toast("설정이 저장되었습니다");
+  renderHome();
+}
+
+/* ===================== 시작 ===================== */
+$("btnSettings").onclick = openSettings;
+renderHome();
+</script>
+</body>
+</html>
