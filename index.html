@@ -584,6 +584,7 @@ function renderHistory() {
     </div>
     <button class="btn sec sm" onclick="exportCSV('all')">📤 전체 CSV 내보내기</button>
     <button class="btn sec sm" style="margin-top:8px" onclick="exportCSV('open')">📤 미정산만 CSV 내보내기</button>
+    <button class="btn danger sm" style="margin-top:8px" onclick="deleteAllRecords()">🗑️ 전체 삭제</button>
     <button class="btn sec sm" style="margin-top:8px" onclick="renderHome()">← 홈으로</button>
   `;
 }
@@ -591,6 +592,14 @@ function deleteRecord(id) {
   confirmDialog("기록 삭제", "이 기록을 삭제할까요? 되돌릴 수 없습니다.", "삭제", () => {
     saveRecords(loadRecords().filter(r => r.id !== id));
     toast("삭제되었습니다"); renderHistory();
+  }, true);
+}
+function deleteAllRecords() {
+  const cnt = loadRecords().length;
+  if (cnt === 0) { toast("삭제할 내역이 없습니다"); return; }
+  confirmDialog("전체 삭제", `미정산·정산완료 포함 <b>모든 기록 ${cnt}건</b>이 삭제됩니다.<br>되돌릴 수 없습니다. 계속할까요?`, "전체 삭제", () => {
+    saveRecords([]);
+    toast("모든 기록을 삭제했습니다"); renderHistory();
   }, true);
 }
 
