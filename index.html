@@ -154,13 +154,15 @@ function toast(msg) {
   clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("show"), 2200);
 }
 
-// 금액을 ids 인원에게 균등 분할(원 단위, 나머지는 앞에서부터 1원씩). { id: 금액 } 반환
+// 금액을 ids 인원에게 분할. 각자 100원 단위로 내고, 남는 금액은 첫 번째 사람(ids[0])이 부담. { id: 금액 } 반환
+const SPLIT_UNIT = 100;
 function splitEven(amount, ids) {
   const out = {}; const n = ids.length;
   if (n === 0) return out;
-  const base = Math.floor(amount / n);
-  let rem = amount - base * n;
-  ids.forEach((id, i) => { out[id] = base + (i < rem ? 1 : 0); });
+  amount = Math.round(amount);
+  const others = Math.floor((amount / n) / SPLIT_UNIT) * SPLIT_UNIT;  // 나머지 인원: 100원 단위로 내림
+  ids.forEach(id => { out[id] = others; });
+  out[ids[0]] = amount - others * (n - 1);                            // 첫 번째 사람이 나머지(잔돈 포함) 부담
   return out;
 }
 
@@ -580,7 +582,9 @@ function renderHistory() {
       <div class="row between"><h2 style="margin:0">정산 완료 내역</h2><span class="badge settled">${settled.length}건</span></div>
       ${settled.length ? settled.map(renderRec).join("") : '<p class="muted">아직 없습니다.</p>'}
     </div>
-    <button class="btn sec sm" onclick="renderHome()">← 홈으로</button>
+    <button class="btn sec sm" onclick="exportCSV('all')">📤 전체 CSV 내보내기</button>
+    <button class="btn sec sm" style="margin-top:8px" onclick="exportCSV('open')">📤 미정산만 CSV 내보내기</button>
+    <button class="btn sec sm" style="margin-top:8px" onclick="renderHome()">← 홈으로</button>
   `;
 }
 function deleteRecord(id) {
@@ -588,6 +592,33 @@ function deleteRecord(id) {
     saveRecords(loadRecords().filter(r => r.id !== id));
     toast("삭제되었습니다"); renderHistory();
   }, true);
+}
+
+/* ===================== CSV 내보내기 ===================== */
+function csvCell(v) {
+  const s = String(v == null ? "" : v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function exportCSV(scope) {
+  let recs = loadRecords();
+  if (scope === "open") recs = recs.filter(r => !r.settled);
+  recs = recs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt < b.createdAt ? -1 : 1)));
+  if (recs.length === 0) { toast("내보낼 내역이 없습니다"); return; }
+  const rows = [["날짜", "상점", "정산방식", "팀원", "금액", "상태"]];
+  recs.forEach(r => {
+    Object.keys(r.splits).sort((a, b) => a - b).forEach(k => {
+      rows.push([r.date, r.store || "", r.mode === "1/N" ? "1/N" : "품목별", memberName(+k), r.splits[k], r.settled ? "정산완료" : "미정산"]);
+    });
+  });
+  const csv = rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });  // BOM: 엑셀 한글 깨짐 방지
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `점심식대_${scope === "open" ? "미정산" : "전체"}_${todayStr()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  toast("CSV를 내려받았습니다 (다운로드 폴더 확인)");
 }
 
 /* ===================== 정산 수행 ===================== */
