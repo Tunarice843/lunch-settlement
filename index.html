@@ -169,10 +169,14 @@ function splitEven(amount, ids) {
 function memberName(i) { return (cfg.members[i] && cfg.members[i].trim()) || `팀원${i + 1}`; }
 // 이름이 입력된(사용 중인) 팀원 인덱스만
 function activeIndices() { return cfg.members.map((m, i) => i).filter(i => (cfg.members[i] || "").trim() !== ""); }
-// 합계 표시용: 사용 중인 팀원 + 미정산 기록에 등장한 인덱스(이름을 지워도 잔액은 보이도록)
+// 특정 기록에서 팀원 i가 정산 완료됐는지(팀원별 정산). r.settled(레거시: 전체정산)도 인정.
+function isSettled(r, i) { return !!r.settled || (Array.isArray(r.settledMembers) && r.settledMembers.includes(i)); }
+// 기록에 아직 미정산인 팀원이 한 명이라도 있나
+function recHasOpen(r) { return Object.keys(r.splits).some(k => !isSettled(r, +k)); }
+// 합계 표시용: 사용 중인 팀원 + 미정산 금액이 남은 인덱스(이름을 지워도 잔액은 보이도록)
 function displayIndices() {
   const set = new Set(activeIndices());
-  loadRecords().filter(r => !r.settled).forEach(r => { for (const k in r.splits) set.add(+k); });
+  loadRecords().forEach(r => { for (const k in r.splits) if (!isSettled(r, +k)) set.add(+k); });
   return [...set].sort((a, b) => a - b);
 }
 
@@ -195,9 +199,8 @@ function confirmDialog(title, body, okLabel, onOk, danger) {
 
 /* ===================== 홈 화면 ===================== */
 function balancesByMember() {
-  const recs = loadRecords().filter(r => !r.settled);
   const bal = cfg.members.map(() => 0);
-  recs.forEach(r => { for (const k in r.splits) bal[+k] += r.splits[k]; });
+  loadRecords().forEach(r => { for (const k in r.splits) if (!isSettled(r, +k)) bal[+k] += r.splits[k]; });
   return bal;
 }
 
@@ -205,7 +208,7 @@ function renderHome() {
   draft = null;
   const bal = balancesByMember();
   const grand = bal.reduce((a, b) => a + b, 0);
-  const openCount = loadRecords().filter(r => !r.settled).length;
+  const openCount = loadRecords().filter(recHasOpen).length;
   const needSetup = !cfg.apiKey;
 
   $("main").innerHTML = `
@@ -220,16 +223,44 @@ function renderHome() {
         <span class="badge open">${openCount}건</span></div>
       <div class="total-amt" style="margin:8px 0 14px">${won(grand)}</div>
       <div>
-        ${displayIndices().map(i => `<div class="bal-row"><span class="bal-name">${esc(memberName(i))}</span><span class="bal-amt">${won(bal[i] || 0)}</span></div>`).join("")}
+        ${displayIndices().map(i => {
+          const amt = bal[i] || 0;
+          const action = amt > 0
+            ? `<button class="btn ok" style="width:auto;margin:0;padding:6px 14px;font-size:13px" onclick="settleMember(${i})">정산</button>`
+            : `<span class="small muted">정산완료</span>`;
+          return `<div class="bal-row">
+            <span class="bal-name">${esc(memberName(i))}</span>
+            <span class="row" style="gap:12px"><span class="bal-amt">${won(amt)}</span>${action}</span>
+          </div>`;
+        }).join("") || '<p class="muted">미정산 금액이 없습니다.</p>'}
       </div>
     </div>
 
     <button class="btn" onclick="startReceipt()">📷 영수증 추가</button>
-    <div class="grid2" style="margin-top:10px">
-      <button class="btn sec sm" onclick="renderHistory()">📒 내역 보기</button>
-      <button class="btn sec sm" onclick="doSettle()">✅ 정산 수행</button>
-    </div>
+    <button class="btn sec" onclick="renderHistory()">📒 내역 보기</button>
   `;
+}
+
+// 팀원 한 명의 미정산 금액을 정산 완료 처리(잔액 0)
+function settleMember(i) {
+  const amt = balancesByMember()[i] || 0;
+  if (amt <= 0) { toast("정산할 금액이 없습니다"); return; }
+  confirmDialog(`${memberName(i)} 정산`,
+    `<b>${esc(memberName(i))}</b>님의 미정산 금액 <b>${won(amt)}</b>을 정산 완료 처리합니다.<br>잔액이 0원으로 초기화됩니다. (기록은 그대로 보존)`,
+    "정산 완료", () => {
+      const recs = loadRecords();
+      recs.forEach(r => {
+        if (isSettled(r, i)) return;
+        if (r.splits[i] == null) return;
+        r.settledMembers = r.settledMembers || [];
+        if (!r.settledMembers.includes(i)) r.settledMembers.push(i);
+        // 이 기록의 모든 팀원이 정산되면 기록 자체도 완료로 표시
+        if (Object.keys(r.splits).every(k => isSettled(r, +k))) { r.settled = true; r.settledAt = new Date().toISOString(); }
+      });
+      saveRecords(recs);
+      toast(`${memberName(i)} 정산 완료`);
+      renderHome();
+    });
 }
 
 /* ===================== 영수증 추가: 이미지 입력 ===================== */
@@ -573,10 +604,14 @@ function commitRecord(mode, splits, extra) {
 /* ===================== 내역 보기 ===================== */
 function renderHistory() {
   const recs = loadRecords().slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt < b.createdAt ? 1 : -1)));
-  const open = recs.filter(r => !r.settled);
-  const settled = recs.filter(r => r.settled);
+  const open = recs.filter(recHasOpen);
+  const settled = recs.filter(r => !recHasOpen(r));
   const renderRec = (r) => {
-    const parts = Object.keys(r.splits).sort((a,b)=>a-b).map(k => `${memberName(+k)} ${won(r.splits[k])}`).join(" · ");
+    const keys = Object.keys(r.splits).sort((a,b)=>a-b);
+    const parts = keys.map(k => `${memberName(+k)} ${won(r.splits[k])}${isSettled(r, +k) ? " ✓" : ""}`).join(" · ");
+    const allSettled = keys.every(k => isSettled(r, +k));
+    const noneSettled = keys.every(k => !isSettled(r, +k));
+    const stBadge = allSettled ? ["settled", "정산완료"] : noneSettled ? ["open", "미정산"] : ["open", "일부정산"];
     return `<div class="rec">
       <div class="rec-head">
         <span>${esc(r.date)} · ${esc(r.store || "상점미상")}</span>
@@ -584,7 +619,7 @@ function renderHistory() {
       </div>
       <div class="rec-sub">
         <span class="badge ${r.mode === "1/N" ? "n1" : "item"}">${r.mode === "1/N" ? "1/N" : "품목별"}</span>
-        <span class="badge ${r.settled ? "settled" : "open"}">${r.settled ? "정산완료" : "미정산"}</span>
+        <span class="badge ${stBadge[0]}">${stBadge[1]}</span>
         &nbsp;${esc(parts)}
       </div>
       <div style="margin-top:8px"><button class="btn danger sm" style="width:auto;padding:6px 12px" onclick="deleteRecord('${r.id}')">삭제</button></div>
@@ -627,13 +662,14 @@ function csvCell(v) {
 }
 function exportCSV(scope) {
   let recs = loadRecords();
-  if (scope === "open") recs = recs.filter(r => !r.settled);
+  if (scope === "open") recs = recs.filter(recHasOpen);
   recs = recs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt < b.createdAt ? -1 : 1)));
   if (recs.length === 0) { toast("내보낼 내역이 없습니다"); return; }
   const rows = [["날짜", "상점", "정산방식", "팀원", "금액", "상태"]];
   recs.forEach(r => {
     Object.keys(r.splits).sort((a, b) => a - b).forEach(k => {
-      rows.push([r.date, r.store || "", r.mode === "1/N" ? "1/N" : "품목별", memberName(+k), r.splits[k], r.settled ? "정산완료" : "미정산"]);
+      if (scope === "open" && isSettled(r, +k)) return;  // 미정산 CSV엔 미정산 팀원만
+      rows.push([r.date, r.store || "", r.mode === "1/N" ? "1/N" : "품목별", memberName(+k), r.splits[k], isSettled(r, +k) ? "정산완료" : "미정산"]);
     });
   });
   const csv = rows.map(row => row.map(csvCell).join(",")).join("\r\n");
@@ -645,56 +681,6 @@ function exportCSV(scope) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1500);
   toast("CSV를 내려받았습니다 (다운로드 폴더 확인)");
-}
-
-/* ===================== 정산 수행 ===================== */
-function doSettle() {
-  const open = loadRecords().filter(r => !r.settled);
-  if (open.length === 0) { toast("정산할 내역이 없습니다"); return; }
-  const bal = balancesByMember();
-  const grand = bal.reduce((a, b) => a + b, 0);
-  const summary = buildSettleSummary(bal, grand, open);
-  $("modalRoot").innerHTML = `
-    <div class="overlay" id="ov"><div class="modal">
-      <h3>정산 수행</h3>
-      <div class="muted" style="margin-bottom:10px">아래 ${open.length}건(총 ${won(grand)})을 정산 완료 처리합니다.<br>
-      처리 후 미정산 잔액은 <b>0원으로 초기화</b>되며, 기록 자체는 보존됩니다.</div>
-      <div class="summary-box" id="settleSummary">${esc(summary)}</div>
-      <button class="btn sec sm" style="margin-top:10px" onclick="copySummary()">📋 정산 내역 복사 (메일용)</button>
-      <button class="btn danger" style="margin-top:14px" onclick="confirmSettle()">정산 확정 (잔액 0 초기화)</button>
-      <button class="btn sec sm" style="margin-top:10px" onclick="closeModal()">취소</button>
-    </div></div>`;
-  $("ov").onclick = (e) => { if (e.target.id === "ov") closeModal(); };
-}
-function buildSettleSummary(bal, grand, open) {
-  const dates = open.map(r => r.date).sort();
-  let s = `[점심식대 정산]\n기간: ${dates[0]} ~ ${dates[dates.length-1]}\n건수: ${open.length}건\n총액: ${won(grand)}\n\n`;
-  bal.forEach((b, i) => { if (b > 0) s += `${memberName(i)}: ${won(b)}\n`; });
-  return s.trim();
-}
-let _lastSummary = "";
-function copySummary() {
-  _lastSummary = $("settleSummary").textContent;
-  const done = () => toast("복사되었습니다");
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(_lastSummary).then(done).catch(() => fallbackCopy(_lastSummary, done));
-  } else fallbackCopy(_lastSummary, done);
-}
-function fallbackCopy(text, cb) {
-  const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select();
-  try { document.execCommand("copy"); cb(); } catch { toast("복사 실패 — 길게 눌러 직접 복사하세요"); }
-  document.body.removeChild(ta);
-}
-function confirmSettle() {
-  closeModal();
-  confirmDialog("정말 정산할까요?", "미정산 내역이 모두 정산 완료로 바뀌고 잔액이 0이 됩니다.", "확정", () => {
-    const recs = loadRecords();
-    const batch = "b" + Date.now();
-    recs.forEach(r => { if (!r.settled) { r.settled = true; r.settledBatch = batch; r.settledAt = new Date().toISOString(); } });
-    saveRecords(recs);
-    toast("정산 완료 — 잔액이 초기화되었습니다");
-    renderHome();
-  }, true);
 }
 
 /* ===================== 설정 ===================== */
