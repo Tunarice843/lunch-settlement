@@ -267,12 +267,13 @@ function onImage(file) {
 
 /* ===================== AI Vision 호출 ===================== */
 const VISION_PROMPT =
-  "이 이미지는 한국 식당의 영수증입니다. 메뉴 항목과 금액을 추출해 아래 JSON 형식으로만 답하세요. " +
+  "이 이미지는 한국 식당의 영수증입니다. 메뉴 항목과 수량, 금액을 추출해 아래 JSON 형식으로만 답하세요. " +
   "설명/마크다운 없이 순수 JSON만 출력합니다.\n" +
   '{"store":"상점명 또는 빈문자열","date":"YYYY-MM-DD(없으면 빈문자열)",' +
-  '"items":[{"name":"메뉴명","price":숫자}],"total":숫자}\n' +
+  '"items":[{"name":"메뉴명","qty":수량숫자(없으면 1),"price":숫자}],"total":숫자}\n' +
   "규칙: items에는 실제 주문 메뉴만 넣습니다. 소계/합계/부가세/봉사료/할인/카드승인/잔돈 등은 제외. " +
-  "수량이 2 이상인 메뉴는 그 줄의 합계 금액(단가×수량)을 price로 넣습니다. price와 total은 숫자만(쉼표·원 표시 없이).";
+  "qty는 그 메뉴의 주문 수량입니다. price는 그 줄의 합계 금액(단가×수량)으로 넣습니다(수량이 2 이상이면 단가가 아니라 합계). " +
+  "price·qty·total은 숫자만(쉼표·원 표시 없이).";
 
 async function analyze() {
   if (!draft || !draft.base64) { toast("이미지를 먼저 선택하세요"); return; }
@@ -282,7 +283,7 @@ async function analyze() {
     const data = await callVision(draft.base64, draft.mime);
     draft.store = data.store || "";
     draft.date = (data.date && /^\d{4}-\d{2}-\d{2}$/.test(data.date)) ? data.date : todayStr();
-    draft.items = (data.items || []).filter(it => it && it.name).map(it => ({ name: String(it.name), price: Math.max(0, Math.round(Number(it.price) || 0)) }));
+    draft.items = (data.items || []).filter(it => it && it.name).map(it => ({ name: String(it.name), qty: Math.max(1, Math.round(Number(it.qty) || 1)), price: Math.max(0, Math.round(Number(it.price) || 0)) }));
     const sum = draft.items.reduce((a, it) => a + it.price, 0);
     draft.total = Math.round(Number(data.total) || 0) || sum;
     if (draft.items.length === 0) { toast("메뉴를 인식하지 못했습니다. 직접 입력하세요."); }
@@ -363,10 +364,13 @@ function parseJsonLoose(text) {
 function renderReview() {
   const it = draft.items.map((x, i) => `
     <div class="item-card">
-      <div class="row" style="gap:8px">
-        <input type="text" value="${esc(x.name)}" oninput="draft.items[${i}].name=this.value" style="flex:1">
-        <input type="number" value="${x.price}" oninput="draft.items[${i}].price=Math.max(0,Math.round(+this.value||0));refreshSum()" style="width:110px">
-        <button class="btn danger sm" style="width:auto;padding:8px 10px" onclick="draft.items.splice(${i},1);renderReview()">✕</button>
+      <input type="text" value="${esc(x.name)}" oninput="draft.items[${i}].name=this.value" placeholder="메뉴명" style="margin-bottom:8px">
+      <div class="row" style="gap:8px;align-items:flex-end">
+        <div style="flex:0 0 64px"><div class="small muted">수량</div>
+          <input type="number" min="1" value="${x.qty || 1}" oninput="draft.items[${i}].qty=Math.max(1,Math.round(+this.value||1))"></div>
+        <div style="flex:1"><div class="small muted">금액(합계)</div>
+          <input type="number" value="${x.price}" oninput="draft.items[${i}].price=Math.max(0,Math.round(+this.value||0));refreshSum()"></div>
+        <button class="btn danger sm" style="width:auto;padding:10px 12px" onclick="draft.items.splice(${i},1);renderReview()">✕</button>
       </div>
     </div>`).join("");
   $("main").innerHTML = `
@@ -379,7 +383,7 @@ function renderReview() {
       <input type="date" value="${esc(draft.date)}" oninput="draft.date=this.value">
       <label class="fld">메뉴 항목</label>
       ${it || '<p class="muted small">인식된 메뉴가 없습니다. 아래 버튼으로 추가하세요.</p>'}
-      <button class="btn sec sm" onclick="draft.items.push({name:'',price:0});renderReview()">+ 항목 추가</button>
+      <button class="btn sec sm" onclick="draft.items.push({name:'',qty:1,price:0});renderReview()">+ 항목 추가</button>
       <div class="row between" style="margin-top:14px">
         <span class="muted">합계</span>
         <input type="number" id="totalInput" value="${draft.total}" oninput="draft.total=Math.max(0,Math.round(+this.value||0))" style="width:140px;text-align:right;font-weight:700">
@@ -451,24 +455,37 @@ function renderItemAssign() {
   drawItemAssign();
 }
 function drawItemAssign() {
+  const lunchers = computeLunchers();
   const html = draft.items.map((it, idx) => {
     const a = itemAssign[idx];
+    const qty = it.qty || 1;
     const chips = activeIndices().map(i =>
       `<div class="chip ${a.members.has(i) && !a.everyone ? "on" : ""}" onclick="toggleItemMember(${idx},${i})">${esc(memberName(i))}</div>`
     ).join("");
+    const count = a.everyone ? lunchers.length : a.members.size;
+    const qtyMismatch = !a.everyone && qty > 1 && a.members.size !== qty;
+    let hint, warn = false;
+    if (count > 0) {
+      hint = `선택 ${count}명 · 1인당 약 ${won(it.price / count)}`;
+      if (qtyMismatch) { hint += `  ⚠ 수량 ${qty}인분인데 ${a.members.size}명 선택됨`; warn = true; }
+    } else { hint = "먹은 팀원을 선택하세요 (여러 명 선택 가능)"; }
     return `
       <div class="item-card">
-        <div class="item-head"><span>${esc(it.name || "(이름없음)")}</span><span class="item-price">${won(it.price)}</span></div>
+        <div class="item-head">
+          <span>${esc(it.name || "(이름없음)")}${qty > 1 ? ` <span class="badge item">×${qty}</span>` : ""}</span>
+          <span class="item-price">${won(it.price)}</span>
+        </div>
         <div class="member-grid">
           ${chips}
           <div class="chip all ${a.everyone ? "on" : ""}" onclick="toggleItemEveryone(${idx})">전원</div>
         </div>
+        <div class="small" style="margin-top:8px;${warn ? "color:var(--warn);font-weight:600" : "color:var(--mut)"}">${hint}</div>
       </div>`;
   }).join("");
   $("main").innerHTML = `
     <div class="card">
       <h2>품목별 배정</h2>
-      <p class="muted">각 메뉴를 먹은 팀원을 선택하세요. 여러 명이면 그 인원으로 나눕니다.<br>
+      <p class="muted">각 메뉴를 먹은 팀원을 <b>여러 명까지</b> 선택할 수 있습니다. 같은 메뉴를 2명 이상이 먹어 수량이 <b>×2·×3</b>이면 그 인원을 모두 선택하면 합계 금액이 자동으로 나눠집니다.<br>
       <b>전원</b> = 점심 먹은 인원수로 분할(공유 사이드 메뉴용).</p>
       ${html || '<p class="muted">항목이 없습니다.</p>'}
       <div class="summary-box small" id="assignPreview" style="margin-top:6px"></div>
@@ -540,7 +557,7 @@ function commitRecord(mode, splits, extra) {
   const rec = {
     id: "r" + Date.now() + Math.floor(Math.random() * 1000),
     date: draft.date, store: draft.store, mode,
-    items: draft.items.map(x => ({ name: x.name, price: x.price })),
+    items: draft.items.map(x => ({ name: x.name, qty: x.qty || 1, price: x.price })),
     total: draft.total,
     splits, settled: false, settledBatch: null,
     createdAt: new Date().toISOString(),
