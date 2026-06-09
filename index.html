@@ -138,6 +138,12 @@ function loadRecords() {
   try { return JSON.parse(localStorage.getItem(REC_KEY) || "[]"); } catch { return []; }
 }
 function saveRecords(r) { localStorage.setItem(REC_KEY, JSON.stringify(r)); }
+// 정산 배치(수금관리용 스냅샷): [{ id, date, createdAt, entries:[{ i, amount, paid, paidAt }] }]
+const BATCH_KEY = "lunch_batches_v1";
+function loadBatches() {
+  try { return JSON.parse(localStorage.getItem(BATCH_KEY) || "[]"); } catch { return []; }
+}
+function saveBatches(b) { localStorage.setItem(BATCH_KEY, JSON.stringify(b)); }
 
 let cfg = loadCfg();
 // 진행 중인 영수증 작업 상태
@@ -223,43 +229,100 @@ function renderHome() {
         <span class="badge open">${openCount}건</span></div>
       <div class="total-amt" style="margin:8px 0 14px">${won(grand)}</div>
       <div>
-        ${displayIndices().map(i => {
-          const amt = bal[i] || 0;
-          const action = amt > 0
-            ? `<button class="btn ok" style="width:auto;margin:0;padding:6px 14px;font-size:13px" onclick="settleMember(${i})">정산</button>`
-            : `<span class="small muted">정산완료</span>`;
-          return `<div class="bal-row">
-            <span class="bal-name">${esc(memberName(i))}</span>
-            <span class="row" style="gap:12px"><span class="bal-amt">${won(amt)}</span>${action}</span>
-          </div>`;
-        }).join("") || '<p class="muted">미정산 금액이 없습니다.</p>'}
+        ${displayIndices().map(i => `<div class="bal-row"><span class="bal-name">${esc(memberName(i))}</span><span class="bal-amt">${won(bal[i] || 0)}</span></div>`).join("")}
       </div>
+      <button class="btn ok" style="margin-top:14px" onclick="doSettle()" ${grand > 0 ? "" : "disabled"}>✅ 정산 수행 (금액 확정)</button>
     </div>
 
     <button class="btn" onclick="startReceipt()">📷 영수증 추가</button>
     <button class="btn sec" onclick="renderHistory()">📒 내역 보기</button>
+    <button class="btn sec" onclick="renderCollections()">💰 수금관리</button>
   `;
 }
 
-// 팀원 한 명의 미정산 금액을 정산 완료 처리(잔액 0)
-function settleMember(i) {
-  const amt = balancesByMember()[i] || 0;
-  if (amt <= 0) { toast("정산할 금액이 없습니다"); return; }
-  confirmDialog(`${memberName(i)} 정산`,
-    `<b>${esc(memberName(i))}</b>님의 미정산 금액 <b>${won(amt)}</b>을 정산 완료 처리합니다.<br>잔액이 0원으로 초기화됩니다. (기록은 그대로 보존)`,
-    "정산 완료", () => {
+// 일괄 정산: 현재 미정산 금액을 팀원별로 스냅샷 → 수금관리에 기록하고, 미정산 합계는 0으로 초기화
+function doSettle() {
+  const bal = balancesByMember();
+  const entries = displayIndices().map(i => ({ i, amount: bal[i] || 0 })).filter(e => e.amount > 0);
+  if (entries.length === 0) { toast("정산할 미정산 금액이 없습니다"); return; }
+  const grand = entries.reduce((a, e) => a + e.amount, 0);
+  confirmDialog("정산 수행",
+    `현재 미정산 합계 <b>${won(grand)}</b>을 이 시점 금액으로 확정합니다.<br>· 팀원별 금액이 <b>수금관리</b>에 기록됩니다.<br>· 미정산 합계는 <b>0원으로 초기화</b>되고, 이후 점심은 새로 쌓입니다.<br>· 입금 여부는 수금관리에서 따로 확인합니다.`,
+    "정산 수행", () => {
+      // 1) 현재 미정산 건들을 정산 처리(=배치에 포함)
       const recs = loadRecords();
+      const batchId = "s" + Date.now() + Math.floor(Math.random() * 1000);
       recs.forEach(r => {
-        if (isSettled(r, i)) return;
-        if (r.splits[i] == null) return;
-        r.settledMembers = r.settledMembers || [];
-        if (!r.settledMembers.includes(i)) r.settledMembers.push(i);
-        // 이 기록의 모든 팀원이 정산되면 기록 자체도 완료로 표시
-        if (Object.keys(r.splits).every(k => isSettled(r, +k))) { r.settled = true; r.settledAt = new Date().toISOString(); }
+        Object.keys(r.splits).forEach(k => {
+          const i = +k;
+          if (isSettled(r, i)) return;
+          r.settledMembers = r.settledMembers || [];
+          if (!r.settledMembers.includes(i)) r.settledMembers.push(i);
+        });
+        if (Object.keys(r.splits).every(k => isSettled(r, +k))) { r.settled = true; r.settledBatch = r.settledBatch || batchId; }
       });
       saveRecords(recs);
-      toast(`${memberName(i)} 정산 완료`);
+      // 2) 스냅샷 배치 저장
+      const batches = loadBatches();
+      batches.push({ id: batchId, date: todayStr(), createdAt: new Date().toISOString(), entries: entries.map(e => ({ i: e.i, amount: e.amount, paid: false, paidAt: null })) });
+      saveBatches(batches);
+      toast("정산 완료 — 수금관리에 기록되었습니다");
       renderHome();
+    });
+}
+
+/* ===================== 수금관리 ===================== */
+function renderCollections() {
+  const batches = loadBatches().slice().sort((a, b) =>
+    (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt < b.createdAt ? 1 : -1)));  // 날짜 역순(최근이 위)
+  const card = (b) => {
+    const total = b.entries.reduce((a, e) => a + e.amount, 0);
+    const unpaid = b.entries.filter(e => !e.paid);
+    const collected = total - unpaid.reduce((a, e) => a + e.amount, 0);
+    const allPaid = unpaid.length === 0;
+    const rows = b.entries.slice().sort((x, y) => x.i - y.i).map(e => `
+      <div class="bal-row">
+        <span class="bal-name">${esc(memberName(e.i))}</span>
+        <span class="row" style="gap:12px">
+          <span class="bal-amt">${won(e.amount)}</span>
+          ${e.paid
+            ? `<span class="badge settled">입금완료 ✓</span>`
+            : `<button class="btn ok" style="width:auto;margin:0;padding:6px 14px;font-size:13px" onclick="confirmDeposit('${b.id}',${e.i})">입금확인</button>`}
+        </span>
+      </div>`).join("");
+    return `
+      <div class="card">
+        <div class="row between">
+          <h2 style="margin:0">정산일 ${esc(b.date)}</h2>
+          <span class="badge ${allPaid ? "settled" : "open"}">${allPaid ? "수금완료" : `미수금 ${unpaid.length}명`}</span>
+        </div>
+        <div class="muted small" style="margin:4px 0 10px">정산액 ${won(total)} · 수금 ${won(collected)} / 미수 ${won(total - collected)}</div>
+        ${rows}
+      </div>`;
+  };
+  $("main").innerHTML = `
+    ${batches.length
+      ? batches.map(card).join("")
+      : '<div class="card"><h2>수금관리</h2><p class="muted">아직 정산 내역이 없습니다. 홈에서 <b>정산 수행</b>을 하면 여기에 팀원별 금액이 기록됩니다.</p></div>'}
+    <button class="btn sec" onclick="renderHome()">← 홈으로</button>
+  `;
+}
+
+function confirmDeposit(batchId, i) {
+  const b = loadBatches().find(x => x.id === batchId);
+  const e = b && b.entries.find(x => x.i === i);
+  if (!e || e.paid) return;
+  confirmDialog(`${memberName(i)} 입금확인`,
+    `<b>${esc(memberName(i))}</b>님의 정산액 <b>${won(e.amount)}</b> 입금을 확인 처리합니다.`,
+    "입금완료", () => {
+      const batches = loadBatches();
+      const bb = batches.find(x => x.id === batchId);
+      const ee = bb && bb.entries.find(x => x.i === i);
+      if (!ee) return;
+      ee.paid = true; ee.paidAt = new Date().toISOString();
+      saveBatches(batches);
+      toast(`${memberName(i)} 입금완료`);
+      renderCollections();
     });
 }
 
